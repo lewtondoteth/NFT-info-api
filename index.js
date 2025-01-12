@@ -4,65 +4,59 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Base IPFS URL for Sappy Seals
-const BASE_IPFS_URL = "ipfs://QmXUUXRSAJeb4u8p4yKHmXN1iAKtAV7jwLHjw35TNm5jN7/";
+// NFT collections and IPFS base URLs
+const COLLECTIONS = {
+  sappyseals: "ipfs://QmXUUXRSAJeb4u8p4yKHmXN1iAKtAV7jwLHjw35TNm5jN7/",
+  differentNFTcollection: "ipfs://QmSomeOtherBaseURLHere/"
+};
 
-// List of public IPFS gateways (use as fallback if needed)
+// List of IPFS gateways for failover
 const IPFS_GATEWAYS = [
   "https://ipfs.io/ipfs/",
-  "https://dweb.link/ipfs/",
+  "https://cloudflare-ipfs.com/ipfs/",
   "https://gateway.pinata.cloud/ipfs/"
 ];
 
-// Middleware to handle errors gracefully
-app.use((req, res, next) => {
-  res.setHeader('Content-Type', 'application/json');
-  next();
-});
-
-// Utility function to fetch data from IPFS
-const fetchFromIPFS = async (id) => {
-  // Generate IPFS path
-  const ipfsPath = BASE_IPFS_URL.replace("ipfs://", "") + id;
-
+// Function to fetch from multiple gateways
+const fetchFromGateways = async (cid, path) => {
   for (const gateway of IPFS_GATEWAYS) {
     try {
-      const url = `${gateway}${ipfsPath}`;
+      const url = `${gateway}${cid}/${path}`;
+      console.log(`Trying gateway: ${url}`);
       const response = await axios.get(url);
-      return response.data; // Return data if fetched successfully
+      console.log(`Success: Metadata fetched successfully from ${url}`);
+      return response.data;
     } catch (error) {
-      console.error(`Error fetching from gateway ${gateway}:`, error.message);
-      // Continue to the next gateway in case of failure
+      console.log(`Failed at gateway: ${gateway}`);
     }
   }
-
-  throw new Error("Unable to fetch data from all IPFS gateways.");
+  throw new Error("All IPFS gateways failed");
 };
 
-// Endpoint: /sappyseals/:id
-app.get('/sappyseals/:id', async (req, res) => {
-  const { id } = req.params;
+// Endpoint: /nft/:collection/:id
+app.get('/nft/:collection/:id', async (req, res) => {
+  const { collection, id } = req.params;
 
-  // Validate the ID to ensure it's numeric
-  if (!/^\d+$/.test(id)) {
-    return res.status(400).json({ error: "Invalid ID format. ID must be a numeric value." });
+  const baseIpfsUrl = COLLECTIONS[collection.toLowerCase()];
+  if (!baseIpfsUrl) {
+    return res.status(404).json({ error: `Collection '${collection}' not found` });
   }
 
+  // Parse CID and path
+  const [cid, ...pathParts] = baseIpfsUrl.replace("ipfs://", "").split("/");
+  const path = [id, ...pathParts].join("/");
+
   try {
-    const data = await fetchFromIPFS(id);
-    res.status(200).json(data);
+    const metadata = await fetchFromGateways(cid, path);
+    console.log(`Successfully fetched metadata for ${collection} ID ${id}`);
+    res.status(200).json(metadata);
   } catch (error) {
-    console.error('Error fetching data:', error.message);
+    console.error(`Error fetching metadata:`, error.message);
     res.status(500).json({ error: "Unable to fetch data. Please check the ID or try again later." });
   }
 });
 
-// Handle invalid routes
-app.use((req, res) => {
-  res.status(404).json({ error: "Endpoint not found" });
-});
-
 // Start the server
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`NFT Info API running on port ${PORT}`);
 });
